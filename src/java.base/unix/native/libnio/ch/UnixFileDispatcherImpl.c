@@ -28,7 +28,12 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 
-#if defined(_ALLBSD_SOURCE)
+#if defined(__linux__)
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#endif
+
+#if defined(_ALLBSD_SOURCE) || defined(HAIKU)
 #define lseek64 lseek
 #define stat64 stat
 #define flock64 flock
@@ -354,6 +359,9 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
 {
     jint fd = fdval(env, fdo);
     jint result;
+#if defined(MACOSX) || defined(HAIKU)
+    struct statvfs file_stat;
+#else
     struct statvfs64 file_stat;
 
 #if defined(O_DIRECT) || defined(F_NOCACHE) || defined(DIRECTIO_ON)
@@ -382,6 +390,9 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
         return result;
     }
 #endif
+#if defined(MACOSX) || defined(HAIKU)
+    result = fstatvfs(fd, &file_stat);
+#else
     result = fstatvfs64(fd, &file_stat);
     if(result == -1) {
         JNU_ThrowIOExceptionWithLastError(env, "DirectIO setup failed");

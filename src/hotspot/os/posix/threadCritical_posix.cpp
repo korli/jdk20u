@@ -22,6 +22,7 @@
  * questions.
  *
  */
+#ifndef __HAIKU__
 
 #include "precompiled.hpp"
 #include "runtime/javaThread.hpp"
@@ -60,3 +61,5 @@ ThreadCritical::~ThreadCritical() {
     guarantee(ret == 0, "fatal error with pthread_mutex_unlock()");
   }
 }
+
+#endif // __HAIKU__

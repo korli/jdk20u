@@ -1473,6 +1473,7 @@ size_t os::page_size_for_region_unaligned(size_t region_size, size_t min_pages) 
 #define MAX_PATH    (2 * K)
 #endif
 
+#ifndef __HAIKU__
 void os::pause() {
   char filename[MAX_PATH];
   if (PauseAtStartupFile && PauseAtStartupFile[0]) {
@@ -1497,6 +1498,7 @@ void os::pause() {
                 "Could not open pause file '%s', continuing immediately.\n", filename);
   }
 }
+#endif // __HAIKU__
 
 static const char* errno_to_string (int e, bool short_text) {
   #define ALL_SHARED_ENUMS(X) \

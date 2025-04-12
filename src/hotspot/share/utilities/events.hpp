@@ -241,6 +241,7 @@ class Events : AllStatic {
 
   // Class loading events
   static StringEventLog* _class_loading;
+
  public:
 
   // Print all event logs; limit number of events per event log to be printed with max

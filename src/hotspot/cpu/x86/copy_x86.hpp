@@ -59,6 +59,7 @@ static void pd_zero_to_bytes(void* to, size_t count) {
   (void)memset(to, 0, count);
 }
 
+#ifndef __HAIKU__
 static void pd_conjoint_words(const HeapWord* from, HeapWord* to, size_t count) {
 #if defined AMD64 || defined _WINDOWS
   (void)memmove(to, from, count * HeapWordSize);
@@ -330,6 +331,7 @@ static void pd_arrayof_conjoint_oops(const HeapWord* from, HeapWord* to, size_t 
   pd_conjoint_oops_atomic((const oop*)from, (oop*)to, count);
 #endif // AMD64
 }
+#endif // __HAIKU__
 
 #endif // _WINDOWS
 
