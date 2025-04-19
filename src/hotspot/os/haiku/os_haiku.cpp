@@ -188,10 +188,17 @@ static char cpu_arch[] = "ppc";
 
 void os::Haiku::initialize_system_info() {
   system_info si;
-  get_system_info(&si);
-  set_processor_count(si.cpu_count);
-  _physical_memory = (julong)si.max_pages * (julong)_page_size;
-  assert(processor_count() > 0, "unknown error");
+  status_t result = get_system_info(&si);
+  if (result != B_OK) {
+    fprintf(stderr, "get_system_info failed: %ld\n", result);
+    set_processor_count(1); // Fallback to 1 CPU
+    _physical_memory = 1 * 1024 * 1024 * 1024; // Fallback to 1GB
+  } else {
+    set_processor_count(si.cpu_count);
+    assert(processor_count() > 0, "unknown error");
+    // Use os::vm_page_size() for physical memory calculation
+    _physical_memory = (julong)si.max_pages * (julong)os::vm_page_size();
+  }
 }
 
 void os::init_system_properties_values() {
@@ -1018,14 +1025,19 @@ void os::print_jni_name_suffix_on(outputStream* st, int args_size) {
 // Virtual Memory
 
 //int os::vm_page_size() {
-//  // Seems redundant as all get out
-//  assert(os::Haiku::page_size() != -1, "must call os::init");
-//  return os::Haiku::page_size();
+//  int page_size = getpagesize();
+//  fprintf(stderr, "os::vm_page_size: page_size=%d\n", page_size);
+//  if (page_size <= 0 || page_size > 1024 * 1024) {
+//    fprintf(stderr, "Invalid page_size=%d, using 4096\n", page_size);
+//    return 4096;
+//  }
+//  return page_size;
 //}
-
+//
 //int os::vm_allocation_granularity() {
-//  assert(os::Haiku::page_size() != -1, "must call os::init");
-//  return os::Haiku::page_size();
+//  int page_size = os::vm_page_size();
+//  fprintf(stderr, "os::vm_allocation_granularity: page_size=%d\n", page_size);
+//  return page_size;
 //}
 
 // 'requested_addr' is only treated as a hint, the return value may or
@@ -1355,7 +1367,18 @@ void os::init(void) {
   }
   _page_sizes.add(Haiku::page_size());
 
-  Haiku::initialize_system_info();
+  // Initialize OSInfo page sizes
+  int page_size = getpagesize();
+  fprintf(stderr, "os::init: page_size=%d\n", page_size);
+  if (page_size <= 0 || page_size > 1024 * 1024) {
+    fprintf(stderr, "Invalid page_size=%d, using 4096\n", page_size);
+    page_size = 4096;
+  }
+  OSInfo::set_vm_page_size(page_size);
+  OSInfo::set_vm_allocation_granularity(page_size);
+
+  // Call Haiku-specific initialization
+  os::Haiku::initialize_system_info();
 
   // main_thread points to the aboriginal thread
   Haiku::_main_thread = pthread_self();
