@@ -363,6 +363,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
     struct statvfs file_stat;
 #else
     struct statvfs64 file_stat;
+#endif
 
 #if defined(O_DIRECT) || defined(F_NOCACHE) || defined(DIRECTIO_ON)
 #ifdef O_DIRECT
