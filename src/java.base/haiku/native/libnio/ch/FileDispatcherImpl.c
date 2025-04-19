@@ -31,20 +31,18 @@
 
 #include "jni.h"
 #include "nio.h"
-#include "nio_util.h"
 #include "sun_nio_ch_FileDispatcherImpl.h"
 
 static jfieldID fd_fdID; // ID for FileDescriptor.fd field
 
-#define CHECK_NULL(x) if ((x) == NULL) { \
-    fprintf(stderr, "%s: null pointer\n", __func__); \
-    return; \
-}
-
 JNIEXPORT void JNICALL
 Java_sun_nio_ch_FileDispatcherImpl_init(JNIEnv *env, jclass clazz) {
     fprintf(stderr, "UnixFileDispatcherImpl_init: registering natives\n");
-    CHECK_NULL(LOAD_FIELD_ID(fd_fdID, clazz, "fd", "Ljava/io/FileDescriptor;"));
+    fd_fdID = (*env)->GetFieldID(env, clazz, "fd", "Ljava/io/FileDescriptor;");
+    if (fd_fdID == NULL) {
+        fprintf(stderr, "UnixFileDispatcherImpl_init: GetFieldID failed\n");
+        return;
+    }
 }
 
 JNIEXPORT jint JNICALL
@@ -52,8 +50,8 @@ Java_sun_nio_ch_FileDispatcherImpl_read0(JNIEnv *env, jclass clazz,
                                          jobject fdo, jlong address, jint len) {
     fprintf(stderr, "UnixFileDispatcherImpl_read0: fd=%p, address=%lld, len=%d\n",
             fdo, (long long)address, len);
-    jint fd = fdval(env, fdo);
-    void *buf = (void *)jlong_to_ptr(address);
+    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
+    void *buf = (void *)(intptr_t)address;
     ssize_t result;
 
     result = read(fd, buf, len);
@@ -71,8 +69,8 @@ Java_sun_nio_ch_FileDispatcherImpl_write0(JNIEnv *env, jclass clazz,
                                           jobject fdo, jlong address, jint len) {
     fprintf(stderr, "UnixFileDispatcherImpl_write0: fd=%p, address=%lld, len=%d\n",
             fdo, (long long)address, len);
-    jint fd = fdval(env, fdo);
-    void *buf = (void *)jlong_to_ptr(address);
+    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
+    void *buf = (void *)(intptr_t)address;
     ssize_t result;
 
     result = write(fd, buf, len);
@@ -90,10 +88,9 @@ Java_sun_nio_ch_FileDispatcherImpl_force0(JNIEnv *env, jclass clazz,
                                           jobject fdo, jboolean metaData) {
     fprintf(stderr, "UnixFileDispatcherImpl_force0: fd=%p, metaData=%d\n",
             fdo, metaData);
-    jint fd = fdval(env, fdo);
+    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
     int result;
 
-    // On Haiku, fsync() is sufficient for both data and metadata
     result = fsync(fd);
     if (result == -1) {
         fprintf(stderr, "UnixFileDispatcherImpl_force0: fsync failed: %s\n", strerror(errno));
@@ -112,23 +109,20 @@ Java_sun_nio_ch_FileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
     fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: srcFD=%p, pos=%lld, count=%lld, dstFD=%p, append=%d\n",
             srcFDO, (long long)position, (long long)count, dstFDO, append);
 
-    // Haiku doesn't support sendfile or copy_file_range, so use read/write
     if (append == JNI_TRUE) {
         fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: append not supported\n");
         return IOS_UNSUPPORTED_CASE;
     }
 
-    jint srcFD = fdval(env, srcFDO);
-    jint dstFD = fdval(env, dstFDO);
+    jint srcFD = (*env)->GetIntField(env, srcFDO, fd_fdID);
+    jint dstFD = (*env)->GetIntField(env, dstFDO, fd_fdID);
 
-    // Seek to position in source file
     if (lseek(srcFD, (off_t)position, SEEK_SET) == -1) {
         fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: lseek failed: %s\n", strerror(errno));
         JNU_ThrowIOExceptionWithLastError(env, "Seek failed");
         return IOS_THROWN;
     }
 
-    // Buffer for transfer
     char buf[8192];
     jlong total_transferred = 0;
     jlong remaining = count;
@@ -176,6 +170,5 @@ Java_sun_nio_ch_FileDispatcherImpl_transferFrom0(JNIEnv *env, jobject this,
     fprintf(stderr, "UnixFileDispatcherImpl_transferFrom0: srcFD=%p, dstFD=%p, pos=%lld, count=%lld, append=%d\n",
             srcFDO, dstFDO, (long long)position, (long long)count, append);
 
-    // Same implementation as transferTo0, as Haiku doesn't distinguish direction
     return Java_sun_nio_ch_FileDispatcherImpl_transferTo0(env, this, srcFDO, position, count, dstFDO, append);
 }

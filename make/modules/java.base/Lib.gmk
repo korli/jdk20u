@@ -76,8 +76,10 @@ $(eval $(call SetupJdkLibrary, BUILD_LIBNIO, \
     CFLAGS := $(CFLAGS_JDKLIB), \
     EXTRA_HEADER_DIRS := \
         libnio/ch \
+        java.base:libnio \
         libnio/fs \
-        libnet, \
+        libnet \
+        java.base:share/native/include, \
     LDFLAGS := $(LDFLAGS_JDKLIB) \
         $(call SET_SHARED_LIBRARY_ORIGIN), \
     LIBS_unix := -ljava -lnet, \
@@ -90,6 +92,14 @@ $(eval $(call SetupJdkLibrary, BUILD_LIBNIO, \
         $(SUPPORT_OUTPUTDIR)/native/$(MODULE)/libnet/net.lib \
         advapi32.lib, \
 ))
+
+ifeq ($(OPENJDK_TARGET_OS), haiku)
+  LIBNIO_SRC_DIRS += src/java.base/haiku/native/libnio
+  EXCLUDE_FILES += UnixFileDispatcherImpl.c
+  LIBNIO_CFLAGS += -I$(TOPDIR)/src/java.base/share/native/libnio \
+                   -I$(TOPDIR)/src/java.base/haiku/native/libnio \
+                   -I$(TOPDIR)/src/java.base/share/native/include
+endif
 
 TARGETS += $(BUILD_LIBNIO)
 
