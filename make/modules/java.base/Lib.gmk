@@ -93,10 +93,6 @@ $(eval $(call SetupJdkLibrary, BUILD_LIBNIO, \
         advapi32.lib, \
 ))
 
-ifeq ($(call isTargetOs, haiku), true)
-  EXCLUDE_FILES += $(TOPDIR)/src/java.base/unix/native/libnio/UnixFileDispatcherImpl.c
-endif
-
 TARGETS += $(BUILD_LIBNIO)
 
 $(BUILD_LIBNIO): $(BUILD_LIBNET)

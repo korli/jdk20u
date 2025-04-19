@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,152 +23,113 @@
  * questions.
  */
 
-#include <unistd.h>
-#include <fcntl.h>
 #include <errno.h>
-#include <stdio.h>
-#include <string.h>
+#include <fcntl.h>
+#include <unistd.h> // Pour fsync, lseek, read, write
+#include <sys/stat.h> // Pour fstat
 
 #include "jni.h"
 #include "nio.h"
+#include "nio_util.h"
 #include "sun_nio_ch_FileDispatcherImpl.h"
 
-static jfieldID fd_fdID; // ID for FileDescriptor.fd field
-
-JNIEXPORT void JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_init(JNIEnv *env, jclass clazz) {
-    fprintf(stderr, "UnixFileDispatcherImpl_init: registering natives\n");
-    fd_fdID = (*env)->GetFieldID(env, clazz, "fd", "Ljava/io/FileDescriptor;");
-    if (fd_fdID == NULL) {
-        fprintf(stderr, "UnixFileDispatcherImpl_init: GetFieldID failed\n");
-        return;
-    }
+static jlong
+handle(JNIEnv *env, jlong rv, char *msg)
+{
+    if (rv >= 0)
+        return rv;
+    if (errno == EINTR)
+        return IOS_INTERRUPTED;
+    JNU_ThrowIOExceptionWithLastError(env, msg);
+    return IOS_THROWN;
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_read0(JNIEnv *env, jclass clazz,
-                                         jobject fdo, jlong address, jint len) {
-    fprintf(stderr, "UnixFileDispatcherImpl_read0: fd=%p, address=%lld, len=%d\n",
-            fdo, (long long)address, len);
-    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
-    void *buf = (void *)(intptr_t)address;
-    ssize_t result;
+Java_sun_nio_ch_FileDispatcherImpl_force0(JNIEnv *env, jobject this,
+                                         jobject fdo, jboolean md)
+{
+    jint fd = fdval(env, fdo);
+    int result = 0;
 
-    result = read(fd, buf, len);
-    if (result == -1) {
-        fprintf(stderr, "UnixFileDispatcherImpl_read0: read failed: %s\n", strerror(errno));
-        JNU_ThrowIOExceptionWithLastError(env, "Read failed");
-        return -1;
-    }
-    fprintf(stderr, "UnixFileDispatcherImpl_read0: read %zd bytes\n", result);
-    return (jint)result;
-}
-
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_write0(JNIEnv *env, jclass clazz,
-                                          jobject fdo, jlong address, jint len) {
-    fprintf(stderr, "UnixFileDispatcherImpl_write0: fd=%p, address=%lld, len=%d\n",
-            fdo, (long long)address, len);
-    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
-    void *buf = (void *)(intptr_t)address;
-    ssize_t result;
-
-    result = write(fd, buf, len);
-    if (result == -1) {
-        fprintf(stderr, "UnixFileDispatcherImpl_write0: write failed: %s\n", strerror(errno));
-        JNU_ThrowIOExceptionWithLastError(env, "Write failed");
-        return -1;
-    }
-    fprintf(stderr, "UnixFileDispatcherImpl_write0: wrote %zd bytes\n", result);
-    return (jint)result;
-}
-
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_force0(JNIEnv *env, jclass clazz,
-                                          jobject fdo, jboolean metaData) {
-    fprintf(stderr, "UnixFileDispatcherImpl_force0: fd=%p, metaData=%d\n",
-            fdo, metaData);
-    jint fd = (*env)->GetIntField(env, fdo, fd_fdID);
-    int result;
-
+    // Sur HaikuOS, F_FULLFSYNC n'est probablement pas défini.
+    // Nous allons directement tenter fsync.
     result = fsync(fd);
-    if (result == -1) {
-        fprintf(stderr, "UnixFileDispatcherImpl_force0: fsync failed: %s\n", strerror(errno));
-        JNU_ThrowIOExceptionWithLastError(env, "Force failed");
-        return -1;
-    }
-    fprintf(stderr, "UnixFileDispatcherImpl_force0: fsync succeeded\n");
-    return 0;
+
+    // Note: Sur HaikuOS, il faudrait vérifier si d'autres mécanismes
+    // sont disponibles pour garantir la synchronisation des métadonnées
+    // si 'md' est true. Pour l'instant, nous ignorons 'md'.
+
+    return handle(env, result, "Force failed");
 }
 
 JNIEXPORT jlong JNICALL
 Java_sun_nio_ch_FileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
-                                               jobject srcFDO, jlong position,
-                                               jlong count, jobject dstFDO,
-                                               jboolean append) {
-    fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: srcFD=%p, pos=%lld, count=%lld, dstFD=%p, append=%d\n",
-            srcFDO, (long long)position, (long long)count, dstFDO, append);
+                                                jobject srcFDO,
+                                                jlong position, jlong count,
+                                                jobject dstFDO, jboolean append)
+{
+    jint srcFD = fdval(env, srcFDO);
+    jint dstFD = fdval(env, dstFDO);
+    jlong transferred = 0;
+    ssize_t read_bytes;
+    ssize_t written_bytes;
+    off_t current_src_pos;
+    char buffer[8192]; // Taille du buffer à ajuster
 
-    if (append == JNI_TRUE) {
-        fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: append not supported\n");
-        return IOS_UNSUPPORTED_CASE;
-    }
-
-    jint srcFD = (*env)->GetIntField(env, srcFDO, fd_fdID);
-    jint dstFD = (*env)->GetIntField(env, dstFDO, fd_fdID);
-
-    if (lseek(srcFD, (off_t)position, SEEK_SET) == -1) {
-        fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: lseek failed: %s\n", strerror(errno));
-        JNU_ThrowIOExceptionWithLastError(env, "Seek failed");
+    // Vérifier si la position de départ est valide
+    current_src_pos = lseek(srcFD, position, SEEK_SET);
+    if (current_src_pos == -1) {
+        JNU_ThrowIOExceptionWithLastError(env, "Seek on source failed");
         return IOS_THROWN;
     }
 
-    char buf[8192];
-    jlong total_transferred = 0;
-    jlong remaining = count;
+    while (transferred < count) {
+        long bytes_to_read = (count - transferred < sizeof(buffer)) ? (count - transferred) : sizeof(buffer);
 
-    while (remaining > 0) {
-        size_t to_read = (remaining > (jlong)sizeof(buf)) ? sizeof(buf) : (size_t)remaining;
-        ssize_t nread = read(srcFD, buf, to_read);
-        if (nread == -1) {
-            if (errno == EINTR) {
-                fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: read interrupted\n");
-                return IOS_INTERRUPTED;
+        read_bytes = read(srcFD, buffer, bytes_to_read);
+
+        if (read_bytes > 0) {
+            ssize_t total_written = 0;
+            char *write_ptr = buffer;
+
+            while (total_written < read_bytes) {
+                off_t write_offset = append ? lseek(dstFD, 0, SEEK_END) : lseek(dstFD, 0, SEEK_CUR);
+                if (write_offset == -1 && append) {
+                    // Si lseek en mode append échoue, on essaie d'écrire à la position actuelle
+                    write_offset = lseek(dstFD, 0, SEEK_CUR);
+                }
+                if (write_offset == -1) {
+                    JNU_ThrowIOExceptionWithLastError(env, "Seek on destination failed");
+                    return IOS_THROWN;
+                }
+                written_bytes = pwrite(dstFD, write_ptr, read_bytes - total_written, write_offset);
+
+                if (written_bytes > 0) {
+                    total_written += written_bytes;
+                    write_ptr += written_bytes;
+                } else if (written_bytes == -1) {
+                    if (errno == EINTR)
+                        continue; // Réessayer si interrompu
+                    JNU_ThrowIOExceptionWithLastError(env, "Write failed");
+                    return IOS_THROWN;
+                } else {
+                    // EOF sur la source avant d'avoir lu 'count' octets
+                    break;
+                }
             }
-            fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: read failed: %s\n", strerror(errno));
+            transferred += total_written;
+        } else if (read_bytes == -1) {
+            if (errno == EAGAIN)
+                return IOS_UNAVAILABLE;
+            if (errno == EINTR)
+                return IOS_INTERRUPTED;
             JNU_ThrowIOExceptionWithLastError(env, "Read failed");
             return IOS_THROWN;
+        } else {
+            // EOF sur la source
+            break;
         }
-        if (nread == 0) {
-            break; // EOF
-        }
-
-        ssize_t nwritten = write(dstFD, buf, nread);
-        if (nwritten == -1) {
-            if (errno == EINTR) {
-                fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: write interrupted\n");
-                return IOS_INTERRUPTED;
-            }
-            fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: write failed: %s\n", strerror(errno));
-            JNU_ThrowIOExceptionWithLastError(env, "Write failed");
-            return IOS_THROWN;
-        }
-
-        total_transferred += nwritten;
-        remaining -= nwritten;
     }
 
-    fprintf(stderr, "UnixFileDispatcherImpl_transferTo0: transferred %lld bytes\n", (long long)total_transferred);
-    return total_transferred;
-}
-
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_FileDispatcherImpl_transferFrom0(JNIEnv *env, jobject this,
-                                                 jobject srcFDO, jobject dstFDO,
-                                                 jlong position, jlong count,
-                                                 jboolean append) {
-    fprintf(stderr, "UnixFileDispatcherImpl_transferFrom0: srcFD=%p, dstFD=%p, pos=%lld, count=%lld, append=%d\n",
-            srcFDO, dstFDO, (long long)position, (long long)count, append);
-
-    return Java_sun_nio_ch_FileDispatcherImpl_transferTo0(env, this, srcFDO, position, count, dstFDO, append);
+    return transferred;
 }
