@@ -1369,7 +1369,6 @@ void os::init(void) {
 
   // Initialize OSInfo page sizes
   int page_size = getpagesize();
-  fprintf(stderr, "os::init: page_size=%d\n", page_size);
   if (page_size <= 0 || page_size > 1024 * 1024) {
     fprintf(stderr, "Invalid page_size=%d, using 4096\n", page_size);
     page_size = 4096;
