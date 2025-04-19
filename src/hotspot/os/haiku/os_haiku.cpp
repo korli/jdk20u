@@ -51,6 +51,7 @@
 #include "runtime/mutexLocker.hpp"
 #include "runtime/objectMonitor.hpp"
 #include "runtime/osThread.hpp"
+#include "runtime/threads.hpp"
 #include "runtime/perfMemory.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/statSampler.hpp"
@@ -607,7 +608,7 @@ int os::current_process_id() {
 ////////////////////////////////////////////////////////////////////////////////
 // DLL functions
 
-const char* os::dll_file_extension() { return ".so"; }
+//const char* os::dll_file_extension() { return ".so"; }
 
 // This must be hard coded because it's the system's temporary
 // directory not the java application's temp directory, ala java.io.tmpdir.
@@ -1016,16 +1017,16 @@ void os::print_jni_name_suffix_on(outputStream* st, int args_size) {
 ////////////////////////////////////////////////////////////////////////////////
 // Virtual Memory
 
-int os::vm_page_size() {
-  // Seems redundant as all get out
-  assert(os::Haiku::page_size() != -1, "must call os::init");
-  return os::Haiku::page_size();
-}
+//int os::vm_page_size() {
+//  // Seems redundant as all get out
+//  assert(os::Haiku::page_size() != -1, "must call os::init");
+//  return os::Haiku::page_size();
+//}
 
-int os::vm_allocation_granularity() {
-  assert(os::Haiku::page_size() != -1, "must call os::init");
-  return os::Haiku::page_size();
-}
+//int os::vm_allocation_granularity() {
+//  assert(os::Haiku::page_size() != -1, "must call os::init");
+//  return os::Haiku::page_size();
+//}
 
 // 'requested_addr' is only treated as a hint, the return value may or
 // may not start from the requested address. Unlike Bsd mmap(), this
