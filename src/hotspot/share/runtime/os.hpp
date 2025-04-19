@@ -952,8 +952,10 @@ class os: AllStatic {
   static const char* line_separator();
   static const char* path_separator();
 
+#ifndef __HAIKU__
   // Information about the protection of the page at address '0' on this os.
   inline static bool zero_page_read_protected();
+#endif
 
   static void setup_fpu();
   static juint cpu_microcode_revision();
