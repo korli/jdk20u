@@ -41,7 +41,7 @@
 #ifndef SO_REUSEPORT
 #ifdef __linux__
 #define SO_REUSEPORT 15
-#elif defined(AIX) || defined(MACOSX)
+#elif defined(AIX) || defined(MACOSX) || defined(HAIKU)
 #define SO_REUSEPORT 0x0200
 #else
 #define SO_REUSEPORT 0

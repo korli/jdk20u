@@ -48,9 +48,6 @@ class FileDispatcherImpl extends UnixFileDispatcherImpl {
 
     // -- Native methods --
 
-    static native int read0(FileDescriptor fd, long address, int len)
-        throws IOException;
-
     static native int force0(FileDescriptor fd, boolean metaData)
         throws IOException;
 
