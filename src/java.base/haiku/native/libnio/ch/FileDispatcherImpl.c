@@ -44,31 +44,6 @@ handle(JNIEnv *env, jlong rv, char *msg)
     return IOS_THROWN;
 }
 
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_force0(JNIEnv *env, jobject this,
-                                          jobject fdo, jboolean md)
-{
-    jint fd = fdval(env, fdo);
-    int result = 0;
-
-    result = fcntl(fd, F_FULLFSYNC);
-    if (result == -1) {
-        struct statfs fbuf;
-        int errno_fcntl = errno;
-        if (fstatfs(fd, &fbuf) == 0) {
-            if ((fbuf.f_flags & MNT_LOCAL) == 0) {
-                /* Try fsync() in case file is not local. */
-                result = fsync(fd);
-            }
-        } else {
-            /* fstatfs() failed so restore errno from fcntl(). */
-            errno = errno_fcntl;
-        }
-    }
-
-    return handle(env, result, "Force failed");
-}
-
 JNIEXPORT jlong JNICALL
 Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
                                                 jobject srcFDO,
@@ -81,9 +56,8 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
     ssize_t read_bytes;
     ssize_t written_bytes;
     off_t current_src_pos;
-    char buffer[8192]; // Taille du buffer à ajuster
+    char buffer[8192];
 
-    // Vérifier si la position de départ est valide
     current_src_pos = lseek(srcFD, position, SEEK_SET);
     if (current_src_pos == -1) {
         JNU_ThrowIOExceptionWithLastError(env, "Seek on source failed");
@@ -102,7 +76,6 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
             while (total_written < read_bytes) {
                 off_t write_offset = append ? lseek(dstFD, 0, SEEK_END) : lseek(dstFD, 0, SEEK_CUR);
                 if (write_offset == -1 && append) {
-                    // Si lseek en mode append échoue, on essaie d'écrire à la position actuelle
                     write_offset = lseek(dstFD, 0, SEEK_CUR);
                 }
                 if (write_offset == -1) {
@@ -116,11 +89,10 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
                     write_ptr += written_bytes;
                 } else if (written_bytes == -1) {
                     if (errno == EINTR)
-                        continue; // Réessayer si interrompu
+                        continue;
                     JNU_ThrowIOExceptionWithLastError(env, "Write failed");
                     return IOS_THROWN;
                 } else {
-                    // EOF sur la source avant d'avoir lu 'count' octets
                     break;
                 }
             }
@@ -133,7 +105,6 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
             JNU_ThrowIOExceptionWithLastError(env, "Read failed");
             return IOS_THROWN;
         } else {
-            // EOF sur la source
             break;
         }
     }
