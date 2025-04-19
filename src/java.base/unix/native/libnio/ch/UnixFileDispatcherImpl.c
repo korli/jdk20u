@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,15 @@
  * questions.
  */
 
-#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <fcntl.h>
 #include <sys/uio.h>
+#include <unistd.h>
+#ifdef MACOSX
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 
@@ -45,20 +52,35 @@
 #define ftruncate64 ftruncate
 #define fstat64 fstat
 #define fdatasync fsync
-#define mmap64 mmap
-#define statvfs64 statvfs
-#define fstatvfs64 fstatvfs
 #endif
 
 #include "jni.h"
+#include "jni_util.h"
+#include "jvm.h"
+#include "jlong.h"
 #include "nio.h"
 #include "nio_util.h"
-#include "sun_nio_ch_UnixFileDispatcherImpl.h"
+#include "sun_nio_ch_FileDispatcherImpl.h"
 #include "java_lang_Long.h"
-#include <assert.h>
+
+static int preCloseFD = -1;     /* File descriptor to which we dup other fd's
+                                   before closing them for real */
+
+
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_init(JNIEnv *env, jclass cl)
+{
+    int sp[2];
+    if (socketpair(PF_UNIX, SOCK_STREAM, 0, sp) < 0) {
+        JNU_ThrowIOExceptionWithLastError(env, "socketpair failed");
+        return;
+    }
+    preCloseFD = sp[0];
+    close(sp[1]);
+}
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_read0(JNIEnv *env, jclass clazz,
+Java_sun_nio_ch_FileDispatcherImpl_read0(JNIEnv *env, jclass clazz,
                              jobject fdo, jlong address, jint len)
 {
     jint fd = fdval(env, fdo);
@@ -68,7 +90,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_read0(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_pread0(JNIEnv *env, jclass clazz, jobject fdo,
+Java_sun_nio_ch_FileDispatcherImpl_pread0(JNIEnv *env, jclass clazz, jobject fdo,
                             jlong address, jint len, jlong offset)
 {
     jint fd = fdval(env, fdo);
@@ -78,7 +100,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_pread0(JNIEnv *env, jclass clazz, jobject
 }
 
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_readv0(JNIEnv *env, jclass clazz,
+Java_sun_nio_ch_FileDispatcherImpl_readv0(JNIEnv *env, jclass clazz,
                               jobject fdo, jlong address, jint len)
 {
     jint fd = fdval(env, fdo);
@@ -87,7 +109,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_readv0(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_write0(JNIEnv *env, jclass clazz,
+Java_sun_nio_ch_FileDispatcherImpl_write0(JNIEnv *env, jclass clazz,
                               jobject fdo, jlong address, jint len)
 {
     jint fd = fdval(env, fdo);
@@ -97,7 +119,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_write0(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_pwrite0(JNIEnv *env, jclass clazz, jobject fdo,
+Java_sun_nio_ch_FileDispatcherImpl_pwrite0(JNIEnv *env, jclass clazz, jobject fdo,
                             jlong address, jint len, jlong offset)
 {
     jint fd = fdval(env, fdo);
@@ -107,7 +129,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_pwrite0(JNIEnv *env, jclass clazz, jobjec
 }
 
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_writev0(JNIEnv *env, jclass clazz,
+Java_sun_nio_ch_FileDispatcherImpl_writev0(JNIEnv *env, jclass clazz,
                                        jobject fdo, jlong address, jint len)
 {
     jint fd = fdval(env, fdo);
@@ -127,7 +149,7 @@ handle(JNIEnv *env, jlong rv, char *msg)
 }
 
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_seek0(JNIEnv *env, jclass clazz,
+Java_sun_nio_ch_FileDispatcherImpl_seek0(JNIEnv *env, jclass clazz,
                                          jobject fdo, jlong offset)
 {
     jint fd = fdval(env, fdo);
@@ -141,23 +163,52 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_seek0(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_force0(JNIEnv *env, jobject this,
+Java_sun_nio_ch_FileDispatcherImpl_force0(JNIEnv *env, jobject this,
                                           jobject fdo, jboolean md)
 {
     jint fd = fdval(env, fdo);
     int result = 0;
 
+#ifdef MACOSX || defined(HAIKU)
+    result = fcntl(fd, F_FULLFSYNC);
+    if (result == -1) {
+        struct statfs fbuf;
+        int errno_fcntl = errno;
+        if (fstatfs(fd, &fbuf) == 0) {
+            if ((fbuf.f_flags & MNT_LOCAL) == 0) {
+                /* Try fsync() in case file is not local. */
+                result = fsync(fd);
+            }
+        } else {
+            /* fstatfs() failed so restore errno from fcntl(). */
+            errno = errno_fcntl;
+        }
+    }
+#else /* end MACOSX, begin not-MACOSX */
     if (md == JNI_FALSE) {
         result = fdatasync(fd);
     } else {
+#ifdef _AIX
+        /* On AIX, calling fsync on a file descriptor that is opened only for
+         * reading results in an error ("EBADF: The FileDescriptor parameter is
+         * not a valid file descriptor open for writing.").
+         * However, at this point it is not possibly anymore to read the
+         * 'writable' attribute of the corresponding file channel so we have to
+         * use 'fcntl'.
+         */
+        int getfl = fcntl(fd, F_GETFL);
+        if (getfl >= 0 && (getfl & O_ACCMODE) == O_RDONLY) {
+            return 0;
+        }
+#endif /* _AIX */
         result = fsync(fd);
     }
-
+#endif /* not-MACOSX */
     return handle(env, result, "Force failed");
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_truncate0(JNIEnv *env, jobject this,
+Java_sun_nio_ch_FileDispatcherImpl_truncate0(JNIEnv *env, jobject this,
                                              jobject fdo, jlong size)
 {
     return handle(env,
@@ -166,7 +217,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_truncate0(JNIEnv *env, jobject this,
 }
 
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_size0(JNIEnv *env, jobject this, jobject fdo)
+Java_sun_nio_ch_FileDispatcherImpl_size0(JNIEnv *env, jobject this, jobject fdo)
 {
     jint fd = fdval(env, fdo);
     struct stat64 fbuf;
@@ -187,7 +238,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_size0(JNIEnv *env, jobject this, jobject 
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_lock0(JNIEnv *env, jobject this, jobject fdo,
+Java_sun_nio_ch_FileDispatcherImpl_lock0(JNIEnv *env, jobject this, jobject fdo,
                                       jboolean block, jlong pos, jlong size,
                                       jboolean shared)
 {
@@ -216,16 +267,16 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_lock0(JNIEnv *env, jobject this, jobject 
     lockResult = fcntl(fd, cmd, &fl);
     if (lockResult < 0) {
         if ((cmd == F_SETLK64) && (errno == EAGAIN || errno == EACCES))
-            return sun_nio_ch_UnixFileDispatcherImpl_NO_LOCK;
+            return sun_nio_ch_FileDispatcherImpl_NO_LOCK;
         if (errno == EINTR)
-            return sun_nio_ch_UnixFileDispatcherImpl_INTERRUPTED;
+            return sun_nio_ch_FileDispatcherImpl_INTERRUPTED;
         JNU_ThrowIOExceptionWithLastError(env, "Lock failed");
     }
     return 0;
 }
 
 JNIEXPORT void JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_release0(JNIEnv *env, jobject this,
+Java_sun_nio_ch_FileDispatcherImpl_release0(JNIEnv *env, jobject this,
                                          jobject fdo, jlong pos, jlong size)
 {
     jint fd = fdval(env, fdo);
@@ -247,6 +298,7 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_release0(JNIEnv *env, jobject this,
     }
 }
 
+
 static void closeFileDescriptor(JNIEnv *env, int fd) {
     if (fd != -1) {
         int result = close(fd);
@@ -256,114 +308,53 @@ static void closeFileDescriptor(JNIEnv *env, int fd) {
 }
 
 JNIEXPORT void JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_closeIntFD(JNIEnv *env, jclass clazz, jint fd)
+Java_sun_nio_ch_FileDispatcherImpl_close0(JNIEnv *env, jclass clazz, jobject fdo)
+{
+    jint fd = fdval(env, fdo);
+    closeFileDescriptor(env, fd);
+}
+
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_preClose0(JNIEnv *env, jclass clazz, jobject fdo)
+{
+    jint fd = fdval(env, fdo);
+    if (preCloseFD >= 0) {
+        if (dup2(preCloseFD, fd) < 0)
+            JNU_ThrowIOExceptionWithLastError(env, "dup2 failed");
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_dup0(JNIEnv *env, jobject this, jobject fdo1, jobject fdo2)
+{
+    if (dup2(fdval(env, fdo1), fdval(env, fdo2)) < 0) {
+        JNU_ThrowIOExceptionWithLastError(env, "dup2 failed");
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_closeIntFD(JNIEnv *env, jclass clazz, jint fd)
 {
     closeFileDescriptor(env, fd);
 }
 
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclass klass)
+JNIEXPORT jboolean JNICALL
+Java_sun_nio_ch_FileDispatcherImpl_canTransferToFromOverlappedMap0(JNIEnv *env, jclass clazz)
 {
-    jlong pageSize = sysconf(_SC_PAGESIZE);
-    return pageSize;
-}
-
-JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass klass, jobject fdo,
-                                        jint prot, jlong off, jlong len,
-                                        jboolean map_sync)
-{
-    void *mapAddress = 0;
-    jint fd = fdval(env, fdo);
-    int protections = 0;
-    int flags = 0;
-
-    // should never be called with map_sync and prot == PRIVATE
-    assert((prot != sun_nio_ch_UnixFileDispatcherImpl_MAP_PV) || !map_sync);
-
-    if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_RO) {
-        protections = PROT_READ;
-        flags = MAP_SHARED;
-    } else if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_RW) {
-        protections = PROT_WRITE | PROT_READ;
-        flags = MAP_SHARED;
-    } else if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_PV) {
-        protections =  PROT_WRITE | PROT_READ;
-        flags = MAP_PRIVATE;
-    }
-
-    // if MAP_SYNC and MAP_SHARED_VALIDATE are not defined then it is
-    // best to define them here. This ensures the code compiles on old
-    // OS releases which do not provide the relevant headers. If run
-    // on the same machine then it will work if the kernel contains
-    // the necessary support otherwise mmap should fail with an
-    // invalid argument error
-
-#ifndef MAP_SYNC
-#define MAP_SYNC 0x80000
-#endif
-#ifndef MAP_SHARED_VALIDATE
-#define MAP_SHARED_VALIDATE 0x03
-#endif
-
-    if (map_sync) {
-        // ensure
-        //  1) this is Linux on AArch64, x86_64, or PPC64 LE
-        //  2) the mmap APIs are available at compile time
-#if !defined(LINUX) || ! (defined(aarch64) || (defined(amd64) && defined(_LP64)) || defined(ppc64le))
-        // TODO - implement for solaris/AIX/BSD/WINDOWS and for 32 bit
-        JNU_ThrowInternalError(env, "should never call map on platform where MAP_SYNC is unimplemented");
-        return IOS_THROWN;
+#ifdef MACOSX
+    return JNI_FALSE;
 #else
-        flags |= MAP_SYNC | MAP_SHARED_VALIDATE;
+    return JNI_TRUE;
 #endif
-    }
-
-    mapAddress = mmap64(
-        0,                    /* Let OS decide location */
-        len,                  /* Number of bytes to map */
-        protections,          /* File permissions */
-        flags,                /* Changes are shared */
-        fd,                   /* File descriptor of mapped file */
-        off);                 /* Offset into file */
-
-    if (mapAddress == MAP_FAILED) {
-        if (map_sync && errno == ENOTSUP) {
-            JNU_ThrowIOExceptionWithLastError(env, "map with mode MAP_SYNC unsupported");
-            return IOS_THROWN;
-        }
-
-        if (errno == ENOMEM) {
-            JNU_ThrowOutOfMemoryError(env, "Map failed");
-            return IOS_THROWN;
-        }
-        return handle(env, -1, "Map failed");
-    }
-
-    return ((jlong) (unsigned long) mapAddress);
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_unmap0(JNIEnv *env, jclass klass,
-                                          jlong address, jlong len)
-{
-    void *a = (void *)jlong_to_ptr(address);
-    return handle(env,
-                  munmap(a, (size_t)len),
-                  "Unmap failed");
-}
-
-JNIEXPORT jint JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
-                                              jobject fdo)
+Java_sun_nio_ch_FileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
+                                           jobject fdo)
 {
     jint fd = fdval(env, fdo);
     jint result;
-#if defined(MACOSX) || defined(HAIKU)
-    struct statvfs file_stat;
-#else
-    struct statvfs64 file_stat;
-#endif
+    struct statvfs file_stat; // Use statvfs for all platforms, including Haiku
 
 #if defined(O_DIRECT) || defined(F_NOCACHE) || defined(DIRECTIO_ON)
 #ifdef O_DIRECT
@@ -391,11 +382,8 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_setDirect0(JNIEnv *env, jclass clazz,
         return result;
     }
 #endif
-#if defined(MACOSX) || defined(HAIKU)
     result = fstatvfs(fd, &file_stat);
-#else
-    result = fstatvfs64(fd, &file_stat);
-    if(result == -1) {
+    if (result == -1) {
         JNU_ThrowIOExceptionWithLastError(env, "DirectIO setup failed");
         return result;
     } else {
