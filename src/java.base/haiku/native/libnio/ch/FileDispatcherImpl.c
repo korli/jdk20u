@@ -25,8 +25,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h> // Pour fsync, lseek, read, write
-#include <sys/stat.h> // Pour fstat
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "jni.h"
 #include "nio.h"
@@ -43,24 +43,6 @@ handle(JNIEnv *env, jlong rv, char *msg)
     JNU_ThrowIOExceptionWithLastError(env, msg);
     return IOS_THROWN;
 }
-
-//JNIEXPORT jint JNICALL
-//Java_sun_nio_ch_FileDispatcherImpl_force0(JNIEnv *env, jobject this,
-//                                         jobject fdo, jboolean md)
-//{
-//    jint fd = fdval(env, fdo);
-//    int result = 0;
-//
-//    // Sur HaikuOS, F_FULLFSYNC n'est probablement pas défini.
-//    // Nous allons directement tenter fsync.
-//    result = fsync(fd);
-//
-//    // Note: Sur HaikuOS, il faudrait vérifier si d'autres mécanismes
-//    // sont disponibles pour garantir la synchronisation des métadonnées
-//    // si 'md' est true. Pour l'instant, nous ignorons 'md'.
-//
-//    return handle(env, result, "Force failed");
-//}
 
 JNIEXPORT jlong JNICALL
 Java_sun_nio_ch_FileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
