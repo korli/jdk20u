@@ -25,14 +25,14 @@
 #ifndef OS_CPU_HAIKU_X86_OS_HAIKU_X86_HPP
 #define OS_CPU_HAIKU_X86_OS_HAIKU_X86_HPP
 
-  static void setup_fpu();
+//  static void setup_fpu();
   static bool supports_sse() { return true; }
-  static juint cpu_microcode_revision();  
+//  static juint cpu_microcode_revision();
 
-  static jlong rdtsc();
+//  static jlong rdtsc();
 
   // Used to register dynamic code cache area with the OS
   // Note: Currently only used in 64 bit Windows implementations
-  static bool register_code_area(char *low, char *high) { return true; }
+//  static bool register_code_area(char *low, char *high) { return true; }
 
 #endif // OS_CPU_HAIKU_X86_OS_HAIKU_X86_HPP

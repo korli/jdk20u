@@ -964,24 +964,13 @@ class os: AllStatic {
   // Note: Currently only used in 64 bit Windows implementations
   inline static bool register_code_area(char *low, char *high);
 
-  // Platform-specific code for interacting with individual OSes.
-  // TODO: This is for compatibility only with current usage of os::Linux, etc.
-  // We can get rid of the following block if we rename such a class to something
-  // like ::LinuxUtils
-#if defined(AIX)
-  class Aix;
-#elif defined(BSD)
-  class Bsd;
-#elif defined(LINUX)
-  class Linux;
-#elif defined(_WINDOWS)
-  class win32;
-#endif
-
-  // Ditto - Posix-specific API. Ideally should be moved to something like ::PosixUtils.
+  // Platform dependent stuff
 #ifndef _WINDOWS
-  class Posix;
+# include "os_posix.hpp"
 #endif
+#include OS_CPU_HEADER(os)
+#include OS_HEADER(os)
+
 
   // FIXME - some random stuff that was in os_windows.hpp
 #ifdef _WINDOWS

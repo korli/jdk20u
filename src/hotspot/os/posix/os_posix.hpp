@@ -50,7 +50,7 @@
   return _result; \
 } while(false)
 
-class os::Posix {
+class Posix {
   friend class os;
 
 protected:
