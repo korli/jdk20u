@@ -45,6 +45,20 @@ handle(JNIEnv *env, jlong rv, char *msg)
 }
 
 JNIEXPORT jlong JNICALL
+Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclass clazz) {
+    return (jlong)getpagesize();
+
+    /*
+    system_info info;
+    if (get_system_info(&info) != B_OK) {
+        JNU_ThrowIOExceptionWithLastError(env, "get_system_info failed");
+        return 0;
+    }
+    return (jlong)info.page_size;
+    */
+}
+
+JNIEXPORT jlong JNICALL
 Java_sun_nio_ch_UnixFileDispatcherImpl_transferTo0(JNIEnv *env, jobject this,
                                                 jobject srcFDO,
                                                 jlong position, jlong count,
