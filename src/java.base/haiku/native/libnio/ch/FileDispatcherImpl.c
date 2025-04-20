@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <assert.h>
 //#include <OS.h>
 
 #include "jni.h"
@@ -60,47 +61,92 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclas
     */
 }
 
-// long sun.nio.ch.UnixFileDispatcherImpl.map0(java.io.FileDescriptor, int, long, long, boolean)
-
-// long map(FileDescriptor fd, int prot, long position, long length, boolean isSync)
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jobject this, jobject fd,
-                                        jint prot, jlong position, jlong length,
-                                        jboolean isSync)
+Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass klass, jobject fdo,
+                                        jint prot, jlong off, jlong len,
+                                        jboolean map_sync)
 {
-//    jint fd = fdval(env, fdo);
-    void *mapAddress = NULL;
-    int flags = isSync ? MAP_SHARED : MAP_PRIVATE;
-    jlong pageSize = (jlong)getpagesize();
+    void *mapAddress = 0;
+    jint fd = fdval(env, fdo);
+    int protections = 0;
+    int flags = 0;
 
-    fprintf(stderr, "map0: fd=%d, prot=%d, position=%lld, length=%lld, isSync=%d\n", fd, prot, position, length, isSync);
+    fprintf(stderr, "map0: fd=%d, prot=%d, position=%lld, length=%lld, map_sync=%d\n", fd, prot, len, map_sync);
 
-    /* Validate parameters */
-    if (length < 0 || position < 0) {
-        JNU_ThrowIOException(env, "Invalid size or position");
-        return IOS_THROWN;
+
+    // should never be called with map_sync and prot == PRIVATE
+    assert((prot != sun_nio_ch_UnixFileDispatcherImpl_MAP_PV) || !map_sync);
+
+    if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_RO) {
+        protections = PROT_READ;
+        flags = MAP_SHARED;
+    } else if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_RW) {
+        protections = PROT_WRITE | PROT_READ;
+        flags = MAP_SHARED;
+    } else if (prot == sun_nio_ch_UnixFileDispatcherImpl_MAP_PV) {
+        protections =  PROT_WRITE | PROT_READ;
+        flags = MAP_PRIVATE;
     }
 
-    /* Align position to page size */
-    if (position % pageSize != 0) {
-        JNU_ThrowIOException(env, "Position must be page-aligned");
+    // if MAP_SYNC and MAP_SHARED_VALIDATE are not defined then it is
+    // best to define them here. This ensures the code compiles on old
+    // OS releases which do not provide the relevant headers. If run
+    // on the same machine then it will work if the kernel contains
+    // the necessary support otherwise mmap should fail with an
+    // invalid argument error
+
+#ifndef MAP_SYNC
+#define MAP_SYNC 0x80000
+#endif
+#ifndef MAP_SHARED_VALIDATE
+#define MAP_SHARED_VALIDATE 0x03
+#endif
+
+    if (map_sync) {
+        // ensure
+        //  1) this is Linux on AArch64, x86_64, or PPC64 LE
+        //  2) the mmap APIs are available at compile time
+#if !defined(HAIKU) || !defined(LINUX) || ! (defined(aarch64) || (defined(amd64) && defined(_LP64)) || defined(ppc64le))
+        // TODO - implement for solaris/AIX/BSD/WINDOWS and for 32 bit
+        JNU_ThrowInternalError(env, "should never call map on platform where MAP_SYNC is unimplemented");
         return IOS_THROWN;
+#else
+        flags |= MAP_SYNC | MAP_SHARED_VALIDATE;
+#endif
     }
 
-    /* Validate prot */
-    if (prot != 0 || prot != 1) {
-        JNU_ThrowIOException(env, "Invalid protection flags; must be PROT_READ or PROT_READ | PROT_WRITE");
-        return IOS_THROWN;
-    }
+    mapAddress = mmap(
+        0,                    /* Let OS decide location */
+        len,                  /* Number of bytes to map */
+        protections,          /* File permissions */
+        flags,                /* Changes are shared */
+        fd,                   /* File descriptor of mapped file */
+        off);                 /* Offset into file */
 
-    /* Map the file */
-    mapAddress = mmap(NULL, (size_t)length, prot, flags, fd, (off_t)position);
     if (mapAddress == MAP_FAILED) {
-        JNU_ThrowIOExceptionWithLastError(env, "mmap failed");
-        return IOS_THROWN;
+        if (map_sync && errno == ENOTSUP) {
+            JNU_ThrowIOExceptionWithLastError(env, "map with mode MAP_SYNC unsupported");
+            return IOS_THROWN;
+        }
+
+        if (errno == ENOMEM) {
+            JNU_ThrowOutOfMemoryError(env, "Map failed");
+            return IOS_THROWN;
+        }
+        return handle(env, -1, "Map failed");
     }
 
-    return ptr_to_jlong(mapAddress);
+    return ((jlong) (unsigned long) mapAddress);
+}
+
+JNIEXPORT jint JNICALL
+Java_sun_nio_ch_UnixFileDispatcherImpl_unmap0(JNIEnv *env, jclass klass,
+                                          jlong address, jlong len)
+{
+    void *a = (void *)jlong_to_ptr(address);
+    return handle(env,
+                  munmap(a, (size_t)len),
+                  "Unmap failed");
 }
 
 JNIEXPORT jlong JNICALL
