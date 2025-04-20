@@ -61,14 +61,14 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclas
 }
 
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject fdo, jlong address, jlong position, jlong size, jint mapMode) {
+Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject fdo, jint prot, jlong position, jlong length, jboolean isSync) {
     jint fd = fdval(env, fdo);
     void *mapAddress = NULL;
-    int prot, flags;
+    int flags = isSync ? MAP_SHARED : MAP_PRIVATE;
     jlong pageSize = (jlong)getpagesize();
 
     /* Validate parameters */
-    if (size < 0 || position < 0) {
+    if (length < 0 || position < 0) {
         JNU_ThrowIOException(env, "Invalid size or position");
         return IOS_THROWN;
     }
@@ -79,27 +79,14 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject f
         return IOS_THROWN;
     }
 
-    /* Set protection and flags based on mapMode */
-    switch (mapMode) {
-        case 0: /* READ_ONLY */
-            prot = PROT_READ;
-        flags = MAP_SHARED;
-        break;
-        case 1: /* READ_WRITE */
-            prot = PROT_READ | PROT_WRITE;
-        flags = MAP_SHARED;
-        break;
-        case 2: /* PRIVATE */
-            prot = PROT_READ | PROT_WRITE;
-        flags = MAP_PRIVATE;
-        break;
-        default:
-            JNU_ThrowIOException(env, "Invalid map mode");
+    /* Validate prot */
+    if (prot & ~(PROT_READ | PROT_WRITE)) {
+        JNU_ThrowIOException(env, "Invalid protection flags");
         return IOS_THROWN;
     }
 
     /* Map the file */
-    mapAddress = mmap((void *)jlong_to_ptr(address), (size_t)size, prot, flags, fd, (off_t)position);
+    mapAddress = mmap(NULL, (size_t)length, prot, flags, fd, (off_t)position);
     if (mapAddress == MAP_FAILED) {
         JNU_ThrowIOExceptionWithLastError(env, "mmap failed");
         return IOS_THROWN;
