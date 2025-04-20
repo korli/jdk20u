@@ -27,6 +27,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+//#include <OS.h>
 
 #include "jni.h"
 #include "nio.h"
@@ -56,6 +58,54 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclas
     }
     return (jlong)info.page_size;
     */
+}
+
+JNIEXPORT jlong JNICALL
+Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject fdo, jlong address, jlong position, jlong size, jint mapMode) {
+    jint fd = fdval(env, fdo);
+    void *mapAddress = NULL;
+    int prot, flags;
+    jlong pageSize = (jlong)getpagesize();
+
+    /* Validate parameters */
+    if (size < 0 || position < 0) {
+        JNU_ThrowIOException(env, "Invalid size or position");
+        return IOS_THROWN;
+    }
+
+    /* Align position to page size */
+    if (position % pageSize != 0) {
+        JNU_ThrowIOException(env, "Position must be page-aligned");
+        return IOS_THROWN;
+    }
+
+    /* Set protection and flags based on mapMode */
+    switch (mapMode) {
+        case 0: /* READ_ONLY */
+            prot = PROT_READ;
+        flags = MAP_SHARED;
+        break;
+        case 1: /* READ_WRITE */
+            prot = PROT_READ | PROT_WRITE;
+        flags = MAP_SHARED;
+        break;
+        case 2: /* PRIVATE */
+            prot = PROT_READ | PROT_WRITE;
+        flags = MAP_PRIVATE;
+        break;
+        default:
+            JNU_ThrowIOException(env, "Invalid map mode");
+        return IOS_THROWN;
+    }
+
+    /* Map the file */
+    mapAddress = mmap((void *)jlong_to_ptr(address), (size_t)size, prot, flags, fd, (off_t)position);
+    if (mapAddress == MAP_FAILED) {
+        JNU_ThrowIOExceptionWithLastError(env, "mmap failed");
+        return IOS_THROWN;
+    }
+
+    return ptr_to_jlong(mapAddress);
 }
 
 JNIEXPORT jlong JNICALL
