@@ -60,12 +60,20 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_allocationGranularity0(JNIEnv *env, jclas
     */
 }
 
+// long sun.nio.ch.UnixFileDispatcherImpl.map0(java.io.FileDescriptor, int, long, long, boolean)
+
+// long map(FileDescriptor fd, int prot, long position, long length, boolean isSync)
 JNIEXPORT jlong JNICALL
-Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject fdo, jint prot, jlong position, jlong length, jboolean isSync) {
-    jint fd = fdval(env, fdo);
+Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jobject this, jobject fd,
+                                        jint prot, jlong position, jlong length,
+                                        jboolean isSync)
+{
+//    jint fd = fdval(env, fdo);
     void *mapAddress = NULL;
     int flags = isSync ? MAP_SHARED : MAP_PRIVATE;
     jlong pageSize = (jlong)getpagesize();
+
+    fprintf(stderr, "map0: fd=%d, prot=%d, position=%lld, length=%lld, isSync=%d\n", fd, prot, position, length, isSync);
 
     /* Validate parameters */
     if (length < 0 || position < 0) {
@@ -80,8 +88,8 @@ Java_sun_nio_ch_UnixFileDispatcherImpl_map0(JNIEnv *env, jclass clazz, jobject f
     }
 
     /* Validate prot */
-    if (prot & ~(PROT_READ | PROT_WRITE)) {
-        JNU_ThrowIOException(env, "Invalid protection flags");
+    if (prot != 0 || prot != 1) {
+        JNU_ThrowIOException(env, "Invalid protection flags; must be PROT_READ or PROT_READ | PROT_WRITE");
         return IOS_THROWN;
     }
 
